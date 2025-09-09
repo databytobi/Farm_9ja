@@ -45,9 +45,10 @@ def clean_repetitions(text, max_repeat=2):
 # Translation model
 model_name = "HelpMumHQ/AI-translator-eng-to-9ja"
 tokenizer = M2M100Tokenizer.from_pretrained(model_name)
-translator = M2M100ForConditionalGeneration.from_pretrained(model_name).to(
-    "cuda" if torch.cuda.is_available() else "cpu"
-)
+
+# Force CPU usage to avoid NotImplementedError on Streamlit Cloud
+device = "cpu"
+translator = M2M100ForConditionalGeneration.from_pretrained(model_name).to(device)
 
 
 def translator_fn(text, src_lang, tgt_lang):
@@ -283,3 +284,4 @@ if submitted and question.strip():
 #            mime="application/pdf"
 
 #        )
+
