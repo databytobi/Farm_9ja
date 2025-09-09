@@ -24,8 +24,9 @@ import tempfile
 import tempfile, os, requests
 
 # Load environment variables
-load_dotenv()
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
+os.environ["GOOGLE_API_KEY"] = GOOGLE_API_KEY
+
 
 
 # Normalization Function
@@ -128,7 +129,7 @@ def build_rag_chain(pdf_file=None):
     if pdf_file:
         # Save uploaded file to a temporary path
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-            tmp.write(pdf_file.read())
+            tmp.write(pdf_file.getbuffer())  # ✅ use getbuffer() instead of read()
             pdf_path = tmp.name
     else:
         # Default knowledge base PDF (make sure this exists in your repo!)
@@ -143,11 +144,7 @@ def build_rag_chain(pdf_file=None):
     docs = text_splitter.split_documents(documents)
     texts = [doc.page_content for doc in docs if isinstance(doc.page_content, str) and doc.page_content.strip()]
 
-    # Create embeddings and vectorstore
-    embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-    vectorstore = FAISS.from_texts(texts, embedding_model)
-    retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 3})
-
+    return texts  # (or however you continue to build embeddings/vectorstore/qa_chain)
     
     # Enhanced prompt template with one-shot example and professional instructions
     prompt_template = """
@@ -259,7 +256,11 @@ with st.expander("🔒 Admin: Upload your own PDF knowledge base"):
     if uploaded_pdf:
         st.success("PDF uploaded! All answers will be retrieved from this document.")
 
-qa_chain, agent = build_rag_chain(uploaded_pdf)
+# Build RAG chain depending on whether a PDF was uploaded
+if uploaded_pdf:
+    qa_chain, agent = build_rag_chain(uploaded_pdf)
+else:
+    qa_chain, agent = build_rag_chain()
 
 with st.form("question_form"):
     lang_code = st.selectbox(
@@ -284,4 +285,5 @@ if submitted and question.strip():
 #            mime="application/pdf"
 
 #        )
+
 
