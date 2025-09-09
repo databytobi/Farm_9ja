@@ -1,0 +1,18 @@
+transformers
+langchain
+faiss-cpu
+torch
+google-genai
+python-dotenv
+langchain-community
+duckduckgo-search
+langchain_google_genai
+PyPDF2
+google-generativeai
+sentencepiece
+hf_xet
+sentence-transformers
+ddgs
+Pypdf
+streamlit
+ fpdf2
