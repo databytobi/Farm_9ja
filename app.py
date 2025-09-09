@@ -123,29 +123,33 @@ def translate_with_fallback(text, src_lang, tgt_lang):
     except Exception:
         # Fallback if transformer completely fails
         return llm_translate(normalized_text, src_lang, tgt_lang)
-
-
+        
 def build_rag_chain(pdf_file=None):
-    if pdf_file:
-        # Save uploaded file to a temporary path
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-            tmp.write(pdf_file.getbuffer())  # ✅ use getbuffer() instead of read()
-            pdf_path = tmp.name
-    else:
-        # Default knowledge base PDF (make sure this exists in your repo!)
-        pdf_path = "data/best_practices_for_treating_crop_disease1.pdf"
+if pdf_file:
+with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+tmp.write(pdf_file.read())
+pdf_path = tmp.name
+else:
+pdf_path = "data/best_practices_for_treating_crop_disease1.pdf"
 
-    # Load PDF into LangChain
-    loader = PyPDFLoader(pdf_path)
-    documents = loader.load()
+try:  
+    loader = PyPDFLoader(pdf_path)  
+    documents = loader.load()  
+except Exception:  
+    # Fallback if PDF missing or unreadable  
+    documents = []  
 
-    # Split text into chunks
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-    docs = text_splitter.split_documents(documents)
-    texts = [doc.page_content for doc in docs if isinstance(doc.page_content, str) and doc.page_content.strip()]
+# Split text into chunks  
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)  
+docs = text_splitter.split_documents(documents) if documents else []  
 
-    return texts  # (or however you continue to build embeddings/vectorstore/qa_chain)
-    
+texts = [doc.page_content for doc in docs if isinstance(doc.page_content, str) and doc.page_content.strip()]  
+
+embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")  
+vectorstore = FAISS.from_texts(texts, embedding_model) if texts else None  
+retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 3}) if vectorstore else None
+
+
     # Enhanced prompt template with one-shot example and professional instructions
     prompt_template = """
 You are a professional agricultural assistant for smallholder farmers.
@@ -285,5 +289,6 @@ if submitted and question.strip():
 #            mime="application/pdf"
 
 #        )
+
 
 
