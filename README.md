@@ -32,9 +32,6 @@ Farm_9ja enables farmers to ask questions in their native language and receive e
 🛡 Fallback System: If PDFs are missing/unreadable, the app runs gracefully with limited features.
 
 
-
----
-
 🛠 Tech Stack
 
 Frontend: Streamlit
@@ -56,8 +53,6 @@ Deployment: Compatible with Streamlit Cloud / Docker
 
 
 
----
-
 📂 Project Structure
 
 farm_9ja/
@@ -69,8 +64,6 @@ farm_9ja/
 ├── .gitignore                    # Git ignore file  
 └── README.md                     # Project documentation
 
-
----
 
 ⚡ Installation
 
@@ -96,8 +89,6 @@ source .venv/bin/activate   # Linux/Mac
 pip install -r requirements.txt
 
 
----
-
 ▶ Running the App
 
 streamlit run app.py
@@ -105,7 +96,6 @@ streamlit run app.py
 The app will open in your browser at http://localhost:8501/.
 
 
----
 
 🌍 Usage
 
@@ -118,9 +108,6 @@ The app retrieves knowledge from the PDF and provides an answer.
 You can also upload your own PDF knowledge base.
 
 
-
----
-
 📝 Example Questions
 
 English: When is the best time to plant maize?
@@ -132,9 +119,6 @@ Igbo: Kedu oge kacha mma iji kụọ oka?
 Hausa: Yaushe ne mafi dacewa a dasa masara?
 
 
-
----
-
 🔮 Future Improvements
 
 Add speech-to-text for voice-based farmer queries.
@@ -145,9 +129,6 @@ Connect to real-time weather & market APIs.
 
 Mobile-friendly version for offline usage.
 
-
-
----
 
 🤝 Contributing
 
@@ -169,14 +150,7 @@ Contributions are welcome!
 
 
 
-
----
-
 📜 License
 
 This project is licensed under the MIT License – feel free to use, modify, and share.
 
-
----
-
-👉 Do you also want me to create a short demo section with screenshots (UI + PDF upload + multilingual chat) in the README so that it looks even more appealing for GitHub/portfolio?
