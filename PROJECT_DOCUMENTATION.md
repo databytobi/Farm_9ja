@@ -62,4 +62,3 @@ Farm_9ja is a powerful tool for democratizing agricultural knowledge among small
 
 ---
 
-Would you like me to generate a PDF version of this documentation or help you organize it into a GitHub wiki?
