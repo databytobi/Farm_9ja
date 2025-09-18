@@ -1,55 +1,63 @@
 import streamlit as st
 import unicodedata
 import re
+import time
+import tempfile
+import os
+
 from transformers import M2M100ForConditionalGeneration, M2M100Tokenizer
 from langchain_community.embeddings import HuggingFaceEmbeddings
-
-from langchain.schema import Document
 from langchain_community.vectorstores import FAISS
-
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.chains import RetrievalQA
+from langchain.chains import ConversationalRetrievalChain
 from langchain.prompts import PromptTemplate
 from langchain.tools import DuckDuckGoSearchRun
-from langchain.agents import initialize_agent, Tool
-import torch
-from dotenv import load_dotenv
-import os
+from langchain.agents import initialize_agent, Tool, AgentType
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
-from fpdf import FPDF
-import tempfile
+from langchain.memory import ConversationBufferMemory
 
-import tempfile, os, requests
 
-# Load environment variables
+# Setup API Keys
+
 GOOGLE_API_KEY = st.secrets["GOOGLE_API_KEY"]
 os.environ["GOOGLE_API_KEY"] = GOOGLE_API_KEY
 
 
-# Normalization Function
+# Request Limiter
+
+if "last_requests" not in st.session_state:
+    st.session_state.last_requests = []
+
+def allow_request(limit=3, per_seconds=60):
+    now = time.time()
+    st.session_state.last_requests = [
+        t for t in st.session_state.last_requests if now - t < per_seconds
+    ]
+    if len(st.session_state.last_requests) < limit:
+        st.session_state.last_requests.append(now)
+        return True
+    return False
+
+
+# Text Helpers
+
 def normalize_text(text):
     text = unicodedata.normalize('NFC', text)
-    text = re.sub(r'\s+', ' ', text).strip()
-    return text
+    return re.sub(r'\s+', ' ', text).strip()
 
-
-# Remove repeated phrases
 def clean_repetitions(text, max_repeat=2):
     pattern = r'(\b\w+\b(?: \b\w+\b){0,3})\s*(?:\1\s*){' + str(max_repeat) + ',}'
-    cleaned_text = re.sub(pattern, r'\1', text, flags=re.IGNORECASE)
-    return cleaned_text
+    return re.sub(pattern, r'\1', text, flags=re.IGNORECASE)
 
 
-# Translation model
+# Translation Model
+
 model_name = "HelpMumHQ/AI-translator-eng-to-9ja"
 tokenizer = M2M100Tokenizer.from_pretrained(model_name)
-
-# Force CPU usage to avoid NotImplementedError on Streamlit Cloud
 device = "cpu"
 translator = M2M100ForConditionalGeneration.from_pretrained(model_name).to(device)
-
 
 def translator_fn(text, src_lang, tgt_lang):
     tokenizer.src_lang = src_lang
@@ -59,11 +67,11 @@ def translator_fn(text, src_lang, tgt_lang):
         forced_bos_token_id=tokenizer.get_lang_id(tgt_lang),
         max_new_tokens=512
     )
-    translated = tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)[0]
-    return translated
+    return tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)[0]
 
 
-# LLM wrapper
+# LLM (Gemini)
+
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.0-flash",
     temperature=0.0,
@@ -77,51 +85,37 @@ supported_langs = {
     'en': 'english'
 }
 
-
 def llm_translate(text: str, src_lang: str, tgt_lang: str) -> str:
-    """
-    Translate text from source language to target language using the LLM.
-    This function is ONLY for translation (no explanations, no answering).
-    """
     src_name = supported_langs.get(src_lang, src_lang)
     tgt_name = supported_langs.get(tgt_lang, tgt_lang)
 
     prompt_translate = f"""
-    Translate the following text from {src_name} to {tgt_name}.
-    - Only return the translated text.
-    - Do NOT explain, interpret, or answer the question.
-    - Keep meaning accurate and natural.
+Translate the following text from {src_name} to {tgt_name}.
+- Only return the translated text.
+- Do NOT explain, interpret, or answer the question.
 
-    Text:
-    {text}
-    """
+Text:
+{text}
+"""
 
     response = llm([HumanMessage(content=prompt_translate)])
-    return response.content.strip()
-
+    if hasattr(response, "content"):
+        return response.content.strip()
+    return str(response).strip()
 
 def translate_with_fallback(text, src_lang, tgt_lang):
-    """
-    Always try transformer model first (fast + specialized).
-    If it fails or gives poor result, fallback to Gemini LLM.
-    """
     normalized_text = normalize_text(text)
-
     try:
-        # Primary: Transformer model
         translated = translator_fn(normalized_text, src_lang, tgt_lang)
         cleaned = clean_repetitions(translated)
-
-        # If translation looks too short or suspicious, fallback
         if len(cleaned.strip()) < 5:
-            fallback = llm_translate(normalized_text, src_lang, tgt_lang)
-            return fallback.strip()
-        else:
-            return cleaned.strip()
+            return llm_translate(normalized_text, src_lang, tgt_lang)
+        return cleaned.strip()
     except Exception:
-        # Fallback if transformer completely fails
         return llm_translate(normalized_text, src_lang, tgt_lang)
 
+
+# Build RAG Chain with memory
 
 def build_rag_chain(pdf_file=None):
     if pdf_file:
@@ -135,113 +129,99 @@ def build_rag_chain(pdf_file=None):
         loader = PyPDFLoader(pdf_path)
         documents = loader.load()
     except Exception:
-        # Fallback if PDF missing or unreadable
         documents = []
 
-    # Split text into chunks
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
     docs = text_splitter.split_documents(documents) if documents else []
-
     texts = [doc.page_content for doc in docs if isinstance(doc.page_content, str) and doc.page_content.strip()]
 
     embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
     vectorstore = FAISS.from_texts(texts, embedding_model) if texts else None
     retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 3}) if vectorstore else None
 
-    # Enhanced prompt template
     prompt_template = """
-You are a professional agricultural assistant for smallholder farmers.
+You are a professional Agronomist, Tutor, and Farming Advisor helping smallholder farmers.
 
-Your job is to answer farming questions using the provided context or, if the answer is not in the context, by using the DuckDuckGo Web Search tool.
+Roles:
+- Agronomist: Provide accurate, practical agricultural advice backed by science and best practices.
+- Tutor: If the question is about "why something happens", explain step by step with an example like a teacher.
+- Advisor: Always encourage learning and suggest what the farmer can try next or explore further.
 
-Important rules:
-- Always answer clearly, concisely, and in simple language.
-- Provide actionable advice farmers can immediately apply.
+Guidelines:
+- If the user’s question is unclear, ask clarifying questions before answering.
+- If the question is about "tools, fertilizers, or crops", include best practices and common mistakes.
+- Always explain in clear, simple, farmer-friendly language.
 - If unsure, say "I do not know" and then use DuckDuckGo Web Search.
-- Do not attempt translation. Assume the input is already in English and the output will be translated back if needed.
-
-Example:
-Context:
-Maize is best planted at the start of the rainy season. Use certified seeds for optimal yield.
-
-Question:
-When should I plant maize for best results?
-
-Answer:
-You should plant maize at the start of the rainy season and use certified seeds for the best yield.
-
-Now answer the following:
 
 Context:
 {context}
 
 Question:
 {question}
-"""
 
+Answer as an agronomist + tutor:
+"""
     prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=llm, retriever=retriever, chain_type="stuff",
-        return_source_documents=True, chain_type_kwargs={"prompt": prompt},
+
+    # ConversationalRetrievalChain with memory
+    memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+    qa_chain = ConversationalRetrievalChain.from_llm(
+        llm=llm,
+        retriever=retriever,
+        chain_type="stuff",
+        combine_docs_chain_kwargs={"prompt": prompt},  # ✅ fixed for Pydantic ValidationError
+        memory=memory
     )
 
+    # DuckDuckGo agent for web fallback
     ddg_search = DuckDuckGoSearchRun()
     tools = [
         Tool(
             name="DuckDuckGo Search",
             func=ddg_search.run,
-            description=(
-                "Web search for farming topics. Use this tool when the provided context "
+            description="Web search for farming topics. Use this tool when the provided context "
                 "does not contain the answer. It searches the web for agricultural information, "
                 "research, and best practices. Always summarize search results in clear, simple, "
                 "and actionable advice for farmers."
-            )
         )
     ]
-    agent = initialize_agent(tools, llm, agent="zero-shot-react-description", verbose=False)
+    agent = initialize_agent(
+        tools,
+        llm,
+        agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,  # ✅ updated for compatibility
+        verbose=False
+    )
 
     return qa_chain, agent
 
 
-def answer_question(user_question, user_lang, qa_chain, agent):
-    """
-    Main QA flow:
-    1. Translate user question -> English
-    2. Run RAG QA
-    3. If RAG weak -> use DuckDuckGo agent
-    4. Translate answer back -> user language
-    """
-    user_lang = user_lang if user_lang in supported_langs else 'en'
+# Answer Function
 
-    # Step 1: Translate user question to English
+def answer_question(user_question, user_lang, qa_chain, agent):
     if user_lang != 'en':
         query_en = translate_with_fallback(user_question, user_lang, 'en')
     else:
         query_en = user_question
 
-    # Step 2: Run through RAG
-    result = qa_chain.invoke({"query": query_en})
-    rag_answer = result['result']
+    # Include memory in CRC automatically
+    result = qa_chain({"question": query_en})
+    rag_answer = result['answer']
 
-    # Step 3: Fallback to web search if RAG fails
     if len(rag_answer.strip()) < 10 or "i do not know" in rag_answer.lower():
         rag_answer = agent.run(query_en)
 
-    # Step 4: Translate back to user’s language
     if user_lang != 'en':
         rag_answer = translate_with_fallback(rag_answer, 'en', user_lang)
 
     return rag_answer
 
-
 # Streamlit UI
+
 st.set_page_config(page_title="Farm_9ja Assistant", page_icon="🌾", layout="centered")
 st.title("🌾 Farm_9ja Agricultural Assistant")
 st.markdown("""
 Welcome! Ask your farming questions in English, Yoruba, Igbo, or Hausa.  
 Get practical, actionable advice for smallholder farmers.
-
-Admin Upload: You can upload your own PDF to use as the knowledge base for answering questions.
 """)
 
 with st.expander("🔒 Admin: Upload your own PDF knowledge base"):
@@ -249,23 +229,37 @@ with st.expander("🔒 Admin: Upload your own PDF knowledge base"):
     if uploaded_pdf:
         st.success("PDF uploaded! All answers will be retrieved from this document.")
 
-# Build RAG chain depending on whether a PDF was uploaded
-if uploaded_pdf:
-    qa_chain, agent = build_rag_chain(uploaded_pdf)
-else:
-    qa_chain, agent = build_rag_chain()
+qa_chain, agent = build_rag_chain(uploaded_pdf) if uploaded_pdf else build_rag_chain()
 
-with st.form("question_form"):
-    lang_code = st.selectbox(
-        "Select your language",
-        options=list(supported_langs.keys()),
-        format_func=lambda x: supported_langs[x].capitalize()
-    )
-    question = st.text_area("Enter your farming question:", height=100)
-    submitted = st.form_submit_button("Get Answer")
+# Language dropdown
+lang_choice = st.selectbox(
+    "🌍 Choose your language:",
+    options=["English", "Yoruba", "Igbo", "Hausa"],
+    index=0
+)
 
-if submitted and question.strip():
-    with st.spinner("Thinking..."):
-        answer = answer_question(question, lang_code, qa_chain, agent)
-    st.markdown("#### Answer:")
-    st.success(answer)
+lang_map = {"English": "en", "Yoruba": "yo", "Igbo": "ig", "Hausa": "ha"}
+selected_lang = lang_map[lang_choice]
+
+# Chat interface
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+if user_input := st.chat_input("Ask your farming question..."):
+    if not allow_request():
+        st.warning("⚠ Too many requests. Please wait before asking again.")
+    else:
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        with st.chat_message("user"):
+            st.markdown(user_input)
+
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                answer = answer_question(user_input, selected_lang, qa_chain, agent)
+                st.markdown(answer)
+
+        st.session_state.messages.append({"role": "assistant", "content": answer})
