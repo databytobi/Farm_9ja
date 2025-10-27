@@ -9,7 +9,7 @@ from transformers import M2M100ForConditionalGeneration, M2M100Tokenizer
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.chains import ConversationalRetrievalChain
+from langchain.chains.conversational_retrieval import ConversationalRetrievalChain
 from langchain.prompts import PromptTemplate
 from langchain.tools import DuckDuckGoSearchRun
 from langchain.agents import initialize_agent, Tool, AgentType
@@ -308,3 +308,4 @@ if user_input := st.chat_input("Ask your farming question..."):
                 st.markdown(answer)
 
         st.session_state.messages.append({"role": "assistant", "content": answer})
+
