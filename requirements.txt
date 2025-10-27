@@ -1,5 +1,5 @@
 transformers
-langchain
+langchain==0.0.332
 faiss-cpu
 torch
 google-genai
@@ -16,4 +16,5 @@ ddgs
 Pypdf
 streamlit
  fpdf2
+
 
