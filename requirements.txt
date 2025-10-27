@@ -1,10 +1,11 @@
 transformers
-langchain==0.0.332
+langchain==0.0.292
+langchain-core==0.0.20
 faiss-cpu
 torch
 google-genai
 python-dotenv
-langchain-community
+langchain-community==0.0.18
 duckduckgo-search
 langchain_google_genai==0.0.7
 PyPDF2
@@ -15,7 +16,8 @@ sentence-transformers
 ddgs
 Pypdf
 streamlit
- fpdf2
+fpdf2
+
 
 
 
