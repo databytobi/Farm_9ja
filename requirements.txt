@@ -6,7 +6,7 @@ google-genai
 python-dotenv
 langchain-community
 duckduckgo-search
-langchain_google_genai==0.0.12
+langchain_google_genai==0.0.7
 PyPDF2
 google-generativeai
 sentencepiece
@@ -16,6 +16,7 @@ ddgs
 Pypdf
 streamlit
  fpdf2
+
 
 
 
